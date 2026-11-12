@@ -1,5 +1,7 @@
+import { useRef, useState, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Grid, OrbitControls, TransformControls } from '@react-three/drei';
+import * as THREE from 'three';
 import { SceneObjectMesh } from './SceneObjectMesh';
 import type { GizmoMode, SceneObject } from '../types';
 
@@ -12,7 +14,22 @@ interface Props {
 }
 
 export function Viewport({ objects, selectedId, gizmoMode, onSelect, onUpdate }: Props) {
-  const selected = objects.find((o) => o.id === selectedId) ?? null;
+  // Store a map of all 3D meshes so the gizmo can grab them directly by ID
+  const meshRefs = useRef<Map<string, THREE.Mesh>>(new Map());
+  // Dummy state to force a re-render when the map updates so `selectedMesh` is found
+  const [, setTick] = useState(0);
+
+  const setMeshRef = useCallback((id: string, mesh: THREE.Mesh | null) => {
+    if (mesh) {
+      meshRefs.current.set(id, mesh);
+    } else {
+      meshRefs.current.delete(id);
+    }
+    setTick((t) => t + 1);
+  }, []);
+
+  const selected = objects.find((o) => o.id === selectedId);
+  const selectedMesh = selected ? meshRefs.current.get(selected.id) : null;
 
   return (
     <Canvas
@@ -31,30 +48,24 @@ export function Viewport({ objects, selectedId, gizmoMode, onSelect, onUpdate }:
           obj={obj}
           selected={obj.id === selectedId}
           onSelect={() => onSelect(obj.id)}
-          onChange={(patch) => onUpdate(obj.id, patch)}
+          ref={(node) => setMeshRef(obj.id, node)}
         />
       ))}
 
-      {selected && (
+      {selectedMesh && (
         <TransformControls
+          object={selectedMesh}
           mode={gizmoMode}
-          object={undefined}
-          onObjectChange={(e) => {
-            const target = (e as any)?.target?.object;
-            if (!target) return;
+          onMouseUp={() => {
+            if (!selected) return;
+            // Commit final transform to React state ONLY when the drag finishes
             onUpdate(selected.id, {
-              position: { x: target.position.x, y: target.position.y, z: target.position.z },
-              rotation: { x: target.rotation.x, y: target.rotation.y, z: target.rotation.z },
-              scale: { x: target.scale.x, y: target.scale.y, z: target.scale.z },
+              position: { x: selectedMesh.position.x, y: selectedMesh.position.y, z: selectedMesh.position.z },
+              rotation: { x: selectedMesh.rotation.x, y: selectedMesh.rotation.y, z: selectedMesh.rotation.z },
+              scale: { x: selectedMesh.scale.x, y: selectedMesh.scale.y, z: selectedMesh.scale.z },
             });
           }}
-        >
-          <group
-            position={[selected.position.x, selected.position.y, selected.position.z]}
-            rotation={[selected.rotation.x, selected.rotation.y, selected.rotation.z]}
-            scale={[selected.scale.x, selected.scale.y, selected.scale.z]}
-          />
-        </TransformControls>
+        />
       )}
 
       <OrbitControls makeDefault enableDamping />
